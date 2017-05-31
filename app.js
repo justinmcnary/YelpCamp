@@ -2,9 +2,12 @@ let express  = require('express'),
   app        = express(),
   bodyParser = require('body-parser'),
   mongoose   = require('mongoose'),
+  passport   = require('passport'),
+  LocalStrategy = require('passport-local'),
   request    = require('request'),
   Campground = require('./models/campground'),
   Comment    = require('./models/comment'),
+  User       = require('./models/user'),
   seedDB     = require('./seed')
 
 mongoose.connect('mongodb://localhost/yelp_camp');
@@ -12,6 +15,22 @@ app.use(bodyParser.urlencoded({extended: true}));
 app.set("view engine", "ejs");
 app.use(express.static(__dirname + '/public')) //underscore undersocre dirname
 seedDB();
+
+//PASSPORT CONFIG
+app.use(require('express-session')({
+  secret: "TURBO HOCKEY IS LEGIT!",
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+app.use((req, res, next) => {
+  res.locals.currentUser = req.user;
+  next();
+ });
+passport.use(new LocalStrategy(User.authenticate()));
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 
 app.get('/', (req, res) => {
@@ -25,7 +44,7 @@ app.get('/campgrounds', (req, res) => {
     if(err){
       console.log(`There was an error ${err}`);
     } else{
-      res.render('campgrounds/index', {campgrounds:allCampgrounds});
+      res.render('campgrounds/index', {campgrounds:allCampgrounds, currentUser: req.user});
     }
   });
 });
@@ -67,7 +86,7 @@ app.get('/campgrounds/:id', (req, res) => {
 // Comments Routes
 // =====================
 
-app.get('/campgrounds/:id/comments/new', (req, res) => {
+app.get('/campgrounds/:id/comments/new', isLoggedIn, (req, res) => {
   //find campground by id
   Campground.findById(req.params.id, (err, campground) => {
     if(err) {
@@ -78,7 +97,7 @@ app.get('/campgrounds/:id/comments/new', (req, res) => {
   });
 });
 
-app.post('/campgrounds/:id/comments', (req, res) => {
+app.post('/campgrounds/:id/comments', isLoggedIn, (req, res) => {
 //Lookup campground by id
   Campground.findById(req.params.id, (err, campground) => {
     if(err) {
@@ -97,6 +116,53 @@ app.post('/campgrounds/:id/comments', (req, res) => {
     };
   })
 });
+
+// AUTH ROUTES
+//Show form
+app.get('/register', (req, res) => {
+  res.render('register');
+});
+
+//SIGNUP LOGIC
+app.post('/register', (req, res) => {
+  let newUser = new User({username: req.body.username});
+  User.register(newUser, req.body.password, (err, user) => {
+    if(err){
+      console.log(err);
+      return res.render('register');
+    }
+    passport.authenticate('local')(req, res, function(){
+      res.redirect('/campgrounds');
+    });
+  });
+});
+
+//SHOW LOGIN form
+app.get('/login', (req, res) => {
+  res.render('login');
+});
+
+//handling login logic
+app.post('/login', passport.authenticate('local', 
+  {
+    successRedirect: '/campgrounds',
+    failureRedirect: '/login'
+  }), (req, res) => {
+});
+
+//LOGOUT ROUTE
+app.get('/logout', (req, res) => {
+  req.logout();
+  res.redirect('/campgrounds');
+});
+
+//Prevents users from commenting unless logged in
+function isLoggedIn(req, res, next){
+  if(req.isAuthenticated()){
+    return next();
+  }
+  res.redirect('/login');
+}
 
 app.listen(process.env.PORT || 3005, function() {
   console.log('The server is live! on Port 3005.');
